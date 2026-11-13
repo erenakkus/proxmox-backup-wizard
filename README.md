@@ -1,11 +1,170 @@
 # PVE Backup Manager
 
+> 🇹🇷 **Bu belge iki dillidir: önce Türkçe, ardından İngilizce.** İngilizce bölüme gitmek için [buraya tıklayın](#english).
+> 🇬🇧 **This document is bilingual: Turkish first, then English.** [Jump to the English version](#english).
+
+---
+
+# Türkçe
+
+**Proxmox VE için etkileşimli, tek dosyalık yedekleme zamanlayıcısı.**
+VM ve konteynerlerinizi kullanışlı bir metin arayüzünden seçin, zamanlamayı, saklama politikasını ve hedefi (yerel disk, FTP, SFTP, Google Drive, S3 ve daha fazlası) belirleyin. Gerisini kurulum aracı halleder ve cron kaydını sizin yerinize ekler.
+
+> Yazar: **Eren Akkuş** · Lisans: MIT
+
+## Özellikler
+
+- 🖥️ **Metin tabanlı kurulum ekranı** (whiptail), **Next / Back** ile ileri-geri gezinme
+- ✅ **Tikli VM ve LXC listesi**, gerçek isimleri ve durumlarıyla
+- ⏰ **Esnek zamanlama**: saatlik, 2/3/4/6/8/12 saatte bir, günlük, hafta içi, haftalık, aylık veya özel cron ifadesi
+- 🔢 **Saklama**: her VM/CT için son *N* yedeği tut
+- 🔀 **Temizlik sırası**: *önce yedek al, sonra eskiyi sil* (güvenli) veya *önce eskiyi sil, sonra yedek al* (yer kazandırır)
+- 💾 **Yerel hedefler**: herhangi bir Proxmox storage (disk, USB, NFS, CIFS...) veya özel bir dizin
+- ☁️ [rclone](https://rclone.org) ile **uzak hedefler**: FTP/FTPS, SFTP, Google Drive, OneDrive, Dropbox, Mega, S3 uyumlu servisler (AWS, Wasabi, MinIO, Cloudflare R2...), Backblaze B2, WebDAV (Nextcloud/ownCloud) ve diğer tüm rclone backend'leri
+- 📦 **Uzak hedefte tek tek akış**: bir VM'i yedekle → yükle → doğrula → yerel alanı boşalt → sıradaki VM (yani yalnızca en büyük tek yedeğiniz kadar boş yer yeterli)
+- 🔒 Kilit dosyası çakışan çalıştırmaları engeller, loglar aylık döndürülür
+- 🧹 Temiz kaldırma
+
+## Gereksinimler
+
+- Proxmox VE 7 / 8 / 9 (node üzerinde, `root` olarak çalıştırın)
+- `whiptail` (Proxmox'ta hazır gelir)
+- `rclone` - yalnızca uzak hedefler için (kurulum aracı yüklemeyi teklif eder)
+
+## Hızlı başlangıç
+
+```bash
+git clone https://github.com/erenakkus/proxmox-backup-wizard.git
+cd proxmox-backup-wizard
+chmod +x pve-backup-manager.sh
+sudo ./pve-backup-manager.sh
+```
+
+**Install / reconfigure scheduled backups** seçeneğini seçin ve sihirbazı takip edin.
+
+## Sihirbaz
+
+| Adım | Seçtikleriniz |
+|------|---------------|
+| 1 | Yedeklenecek VM / konteynerler (tiklemek için SPACE) |
+| 2 | Zamanlama (saatlik … aylık … özel cron) |
+| 3 | Her VM/CT için kaç yedek saklanacağı |
+| 4 | Sıra: yedek → eskiyi sil veya eskiyi sil → yedek |
+| 5 | Mod (snapshot / suspend / stop) ve sıkıştırma (zstd / gzip / lzo / yok) |
+| 6 | Hedef türü |
+| 7 | Hedef ayrıntıları (storage, yol, kimlik bilgileri, bağlantı testi) |
+| 8 | Özet → **Install** |
+
+Herhangi bir adımda **Back** ile önceki adıma dönebilirsiniz. Kurulum aracını tekrar çalıştırdığınızda önceki cevaplarınız hazır gelir.
+
+## Zamanlama
+
+| Seçenek | Oluşan cron |
+|---------|-------------|
+| Her saat | `M * * * *` |
+| N saatte bir (2, 3, 4, 6, 8, 12) | `M */N * * *` |
+| Günlük | `M H * * *` |
+| Pazartesi-Cuma | `M H * * 1-5` |
+| Haftalık | `M H * * D` |
+| Aylık (ayın 1-28. günü) | `M H D * *` |
+| Özel | kendi 5 alanlı ifadeniz |
+
+Cron kaydı `/etc/cron.d/pve-backup-manager` dosyasına yazılır.
+
+## Saklama ve temizlik sırası
+
+- **Önce yedek al, sonra eskiyi sil** - yeni yedek başarılı olmadan hiçbir şey silinmez. Kısa bir süre için *N + 1* yedek kadar yer gerekir.
+- **Önce eskiyi sil, sonra yedek al** - yeni yedek oluşmadan önce yer açar. Ancak yedek başarısız olursa geçici olarak yalnızca *N − 1* yedeğiniz kalır. Disk alanı kısıtlıysa kullanın.
+
+Saklama sayısı **her VM/CT için ayrı** uygulanır.
+
+## Hedefler
+
+| Hedef | Notlar |
+|-------|--------|
+| Proxmox storage | `vzdump --storage` kullanır; temizlik `pvesm` ile yapılır. Her storage'ın boş alanını gösterir. |
+| Özel dizin | Örn. `/mnt/usb-backup`; yazma izni kontrol edilir. |
+| FTP / FTPS | İsteğe bağlı explicit TLS. |
+| SFTP | Parola veya SSH anahtarı (kurulum aracı anahtar üretir ve açık anahtarı gösterir). |
+| Bulut diskler | Google Drive, OneDrive, Dropbox, Mega... `rclone config` ile (kurulum aracı sizin için başlatır). |
+| S3 uyumlu | AWS, Wasabi, MinIO, Cloudflare R2, DigitalOcean Spaces ve diğerleri. |
+| Backblaze B2 | Application key ID + key. |
+| WebDAV | Nextcloud, ownCloud ve diğerleri. |
+
+> **Başsız (ekransız) sunucuda Google Drive:** `rclone config` *"Use web browser to automatically authenticate?"* diye sorduğunda **n** cevabını verin, tarayıcısı olan bir bilgisayarda `rclone authorize "drive"` komutunu çalıştırın ve çıkan token'ı buraya yapıştırın.
+
+Uzak hedeflerin kimlik bilgileri rclone tarafından (gizlenmiş olarak) `/root/.config/rclone/rclone.conf` dosyasında saklanır.
+
+## Neler kurulur
+
+| Yol | Amaç |
+|-----|------|
+| `/usr/local/bin/pve-backup-run` | Cron tarafından çalıştırılan yedekleme betiği |
+| `/etc/pve-backup-manager/pve-backup-manager.conf` | Ayarlarınız (yalnızca root okur, parola içermez) |
+| `/etc/cron.d/pve-backup-manager` | Zamanlama |
+| `/var/log/pve-backup-manager.log` | Log (aylık döndürülür) |
+| `/etc/logrotate.d/pve-backup-manager` | Log döndürme ayarı |
+
+## Komutlar
+
+```bash
+sudo ./pve-backup-manager.sh              # etkileşimli menü
+sudo ./pve-backup-manager.sh --run        # hemen bir yedek çalıştır
+sudo ./pve-backup-manager.sh --uninstall  # cron kaydını ve betiği kaldır
+pve-backup-run                            # kurulu betiği doğrudan çalıştır
+tail -f /var/log/pve-backup-manager.log   # logu canlı izle
+```
+
+## Geri yükleme
+
+Yedekler standart `vzdump` arşivleridir.
+
+```bash
+# gerekirse önce uzak hedeften indirin
+rclone copy remote:proxmox-backups/node1/vzdump-qemu-100-2026_01_01-03_00_01.vma.zst /var/lib/vz/dump/
+
+# VM
+qmrestore /var/lib/vz/dump/vzdump-qemu-100-2026_01_01-03_00_01.vma.zst 100
+
+# konteyner
+pct restore 101 /var/lib/vz/dump/vzdump-lxc-101-2026_01_01-03_00_01.tar.zst
+```
+
+## Bilinmesi gerekenler
+
+- VM listesi, scripti çalıştırdığınız **node'u** kapsar. Cluster'da kurulum aracını her node'da ayrı çalıştırın.
+- rclone ile SFTP, varsayılan olarak sunucu host anahtarını sabitlemez. FTP/SFTP hedeflerinde güvenilir ağları veya VPN'i tercih edin, mümkünse FTPS kullanın.
+- Başarısız bir yükleme, o VM'in bir sonraki çalıştırmasına kadar yerel dosyayı staging klasöründe bırakır.
+- Geri yüklemeyi mutlaka **test edin** - denenmemiş bir yedek yalnızca bir umuttur.
+
+## Kaldırma
+
+```bash
+sudo ./pve-backup-manager.sh --uninstall
+```
+
+Mevcut yedek dosyalarına, rclone paketine ve rclone remote'larınıza dokunulmaz.
+
+## Katkı
+
+Issue ve pull request'ler memnuniyetle karşılanır. Fikirler: e-posta / Telegram bildirimleri, Proxmox Backup Server hedefi, bant genişliği sınırı, şifreleme (`rclone crypt`).
+
+## Lisans
+
+MIT © Eren Akkuş
+
+[⬆ Başa dön](#pve-backup-manager)
+
+---
+
+# English
+
+> 🇹🇷 Türkçe sürüm yukarıdadır. [Türkçe bölüme dönmek için tıklayın](#türkçe).
+
 **Interactive, one-file backup scheduler for Proxmox VE.**
 Pick your VMs and containers from a friendly text UI, choose a schedule, a retention policy and a destination (local disk, FTP, SFTP, Google Drive, S3 and more) - the installer does the rest and registers the cron job for you.
 
 > Author: **Eren Akkuş** · License: MIT
-
----
 
 ## Features
 
@@ -142,21 +301,10 @@ Existing backup files, the rclone package and your rclone remotes are never touc
 
 ## Contributing
 
-Issues and pull requests are welcome. Ideas: eren@resyst.com.tr, Proxmox Backup Server target, bandwidth limits, encryption (`rclone crypt`).
-
-## Türkçe Özet
-
-**PVE Backup Manager**, Proxmox VE için tek dosyalık, etkileşimli yedekleme kurulum aracıdır.
-
-1. `sudo ./pve-backup-manager.sh` komutunu çalıştırın.
-2. Açılan ekranda VM/CT'leri tikleyin, **Next** ile ilerleyin (**Back** ile geri dönebilirsiniz).
-3. Zamanlamayı seçin: saatlik, günlük, haftalık, aylık veya özel cron.
-4. Kaç yedek tutulacağını ve sıralamayı seçin: *yedek al → eskiyi sil* veya *eskiyi sil → yedek al*.
-5. Hedefi seçin: yerel disk/dizin, FTP, SFTP, Google Drive, OneDrive, Dropbox, S3, Backblaze B2, WebDAV...
-6. **Install** deyin; cron kaydı otomatik eklenir (`/etc/cron.d/pve-backup-manager`).
-
-Uzak hedeflerde yedekler tek tek alınır: yedek → yükle → doğrula → yerel dosyayı sil → sıradaki VM.
+Issues and pull requests are welcome. Ideas: e-mail / Telegram notifications, Proxmox Backup Server target, bandwidth limits, encryption (`rclone crypt`).
 
 ## License
 
 MIT © Eren Akkuş
+
+[⬆ Back to top](#pve-backup-manager)
