@@ -29,8 +29,8 @@ Pick your VMs and containers from a friendly text UI, choose a schedule, a reten
 ## Quick start
 
 ```bash
-git clone https://github.com/erenakkus/pve-backup-manager.git
-cd pve-backup-manager
+git clone https://github.com/erenakkus/proxmox-backup-wizard.git
+cd proxmox-backup-wizard
 chmod +x pve-backup-manager.sh
 sudo ./pve-backup-manager.sh
 ```
